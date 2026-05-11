@@ -1,0 +1,15 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+data/*
+junior-automation-dev-assignment-main/*
+
+output/*
+relatorio_faturamento_*.xlsx
+
+*.log
+
+.vscode/
