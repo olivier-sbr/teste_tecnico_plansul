@@ -38,6 +38,12 @@ def normalize_dates(df_excel: pd.DataFrame, df_csv: pd.DataFrame):
     return df_excel, df_csv
 
 
+def normalize_monetary_values(df_csv: pd.DataFrame) -> pd.DataFrame:
+    for col in ["vl_servico", "vl_glosa", "vl_liquido"]:
+        df_csv[col] = df_csv[col].str.replace(",", ".").astype(float)
+    return df_csv
+
+
 if __name__ == "__main__":
     df_excel = load_excel("data/cobrancas_internas.xlsx")
     df_csv = load_csv("data/cobrancas_convenio.csv")
@@ -45,7 +51,7 @@ if __name__ == "__main__":
     df_excel = normalize_excel_names(df_excel)
     df_csv = normalize_csv_names(df_csv)
     df_excel, df_csv = normalize_dates(df_excel, df_csv)
+    df_csv = normalize_monetary_values(df_csv)
 
-    print(df_excel[["data_atendimento"]].head())
-    print(df_csv[["dt_realizacao", "dt_lancamento"]].head())
+    print(df_csv[["vl_servico", "vl_glosa", "vl_liquido"]].head())
 
