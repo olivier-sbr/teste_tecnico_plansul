@@ -31,12 +31,21 @@ def normalize_csv_names(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def normalize_dates(df_excel: pd.DataFrame, df_csv: pd.DataFrame):
+    df_excel["data_atendimento"] = pd.to_datetime(df_excel["data_atendimento"], format="%d/%m/%Y")
+    df_csv["dt_realizacao"] = pd.to_datetime(df_csv["dt_realizacao"], format="%Y-%m-%d")
+    df_csv["dt_lancamento"] = pd.to_datetime(df_csv["dt_lancamento"], format="%Y-%m-%d")
+    return df_excel, df_csv
+
+
 if __name__ == "__main__":
     df_excel = load_excel("data/cobrancas_internas.xlsx")
     df_csv = load_csv("data/cobrancas_convenio.csv")
 
     df_excel = normalize_excel_names(df_excel)
     df_csv = normalize_csv_names(df_csv)
+    df_excel, df_csv = normalize_dates(df_excel, df_csv)
 
-    print(df_excel[["paciente", "paciente_norm"]])
-    print(df_csv[["nome_beneficiario", "nome_beneficiario_norm"]].head())
+    print(df_excel[["data_atendimento"]].head())
+    print(df_csv[["dt_realizacao", "dt_lancamento"]].head())
+
