@@ -109,6 +109,7 @@ def rename_pdfs(df: pd.DataFrame) -> dict[str, str]:
         if os.path.exists(dest_path):
             logger.warning(f"destino ja existe, pulando: {pdf} -> {dest_name}")
             counts["destino_existente"] += 1
+            renamed[id_cob] = dest_name
             continue
 
         shutil.copy2(os.path.join("data/laudos", pdf), dest_path)
@@ -155,5 +156,6 @@ if __name__ == "__main__":
 
     logger.info("renomeando laudos")
     renamed = rename_pdfs(df)
+    df["pdf_renomeado"] = df["id_cobranca"].map(renamed)
 
 
