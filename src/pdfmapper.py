@@ -107,4 +107,4 @@ def rename_pdfs(df: pd.DataFrame) -> dict[str, str]:
         f"{counts['nao_identificados']} nao identificados | "
         f"{counts['destino_existente']} destino existente"
     )
-    return renamed
+    return renamed, counts

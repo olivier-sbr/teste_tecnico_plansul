@@ -11,6 +11,7 @@ from sourcemerger import (
     classify_divergences,
 )
 from pdfmapper import rename_pdfs
+from reportwriter import generate_report
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,5 +49,9 @@ if __name__ == "__main__":
     df = classify_divergences(df)
 
     logger.info("renomeando laudos")
-    renamed = rename_pdfs(df)
+    renamed, pdf_counts = rename_pdfs(df)
     df["pdf_renomeado"] = df["id_cobranca"].map(renamed)
+
+    logger.info("gerando relatorio")
+    report_path = generate_report(df, pdf_counts)
+    logger.info(f"relatorio gerado: {report_path}")
