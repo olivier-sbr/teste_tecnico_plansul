@@ -9,5 +9,6 @@ if __name__ == "__main__":
     df_excel = normalize_excel(df_excel)
     df_csv = normalize_csv(df_csv)
 
-    print(df_csv[["vl_servico", "vl_glosa", "vl_liquido"]].head())
+    print(df_csv.columns.tolist())
+    print(df_csv[["id_cobranca"]].head())
 

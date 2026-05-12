@@ -18,6 +18,7 @@ def normalize_excel(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def normalize_csv(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.rename(columns={"num_guia": "id_cobranca"})
     df["nome_beneficiario_norm"] = df["nome_beneficiario"].apply(lambda n: normalize_name(invert_name(n)))
     df["dt_realizacao"] = pd.to_datetime(df["dt_realizacao"], format="%Y-%m-%d")
     df["dt_lancamento"] = pd.to_datetime(df["dt_lancamento"], format="%Y-%m-%d")
