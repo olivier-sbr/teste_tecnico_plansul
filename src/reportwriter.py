@@ -41,16 +41,31 @@ def generate_report(df: pd.DataFrame, pdf_counts: dict, output_dir: str = "outpu
     filepath = os.path.join(output_dir, f"relatorio_faturamento_{yyyymm}.xlsx")
 
     workbook = xlsxwriter.Workbook(filepath)
-    _write_resumo(workbook, df, pdf_counts)
-    _write_detalhamento(workbook, df)
-    _write_alertas(workbook, df)
+    fmts = _create_formats(workbook)
+    _write_resumo(workbook, df, pdf_counts, fmts)
+    _write_detalhamento(workbook, df, fmts)
+    _write_alertas(workbook, df, fmts)
     workbook.close()
 
     return filepath
 
 
-def _write_resumo(workbook: xlsxwriter.Workbook, df: pd.DataFrame, pdf_counts: dict) -> None:
+def _create_formats(workbook: xlsxwriter.Workbook) -> dict:
+    return {
+        "header":        workbook.add_format({"bold": True, "bg_color": "#1F4E79", "font_color": "white", "border": 1}),
+        "section_title": workbook.add_format({"bold": True, "bg_color": "#2E75B6", "font_color": "white"}),
+        "subheader":     workbook.add_format({"bold": True, "bg_color": "#BDD7EE"}),
+        "alert_value":   workbook.add_format({"bg_color": "#FFCCCC"}),
+        "alert_name":    workbook.add_format({"bg_color": "#FFE0CC"}),
+        "alert_source":  workbook.add_format({"bg_color": "#FFFFCC"}),
+    }
+
+
+def _write_resumo(workbook: xlsxwriter.Workbook, df: pd.DataFrame, pdf_counts: dict, fmts: dict) -> None:
     ws = workbook.add_worksheet("Resumo")
+    ws.set_column(0, 0, 28)
+    ws.set_column(1, 1, 16)
+
     fonte_counts = df["fonte"].value_counts()
 
     laudos_rows = [
@@ -66,51 +81,76 @@ def _write_resumo(workbook: xlsxwriter.Workbook, df: pd.DataFrame, pdf_counts: d
         ("EXCEL_ONLY", int(fonte_counts.get("EXCEL_ONLY", 0))),
         ("CSV_ONLY",   int(fonte_counts.get("CSV_ONLY", 0))),
         ("Total",      len(df)),
-    ])
+    ], fmts)
 
     row = _write_section(ws, row, "VALORES (CSV)", ("Métrica", "Valor (R$)"), [
         ("Valor bruto total",   round(float(df["vl_servico"].sum()), 2)),
         ("Total de glosas",     round(float(df["vl_glosa"].sum()), 2)),
         ("Valor líquido total", round(float(df["vl_liquido"].sum()), 2)),
-    ])
+    ], fmts)
 
     _write_section(ws, row, "LAUDOS", ("Situação", "Quantidade"), [
         *laudos_rows,
         ("Total processado", sum(v for _, v in laudos_rows)),
-    ])
+    ], fmts)
 
 
-def _write_detalhamento(workbook: xlsxwriter.Workbook, df: pd.DataFrame) -> None:
+def _write_detalhamento(workbook: xlsxwriter.Workbook, df: pd.DataFrame, fmts: dict) -> None:
     ws = workbook.add_worksheet("Detalhamento")
-    _write_sheet(ws, df)
+    _write_sheet(ws, df, fmts)
 
 
-def _write_alertas(workbook: xlsxwriter.Workbook, df: pd.DataFrame) -> None:
+def _write_alertas(workbook: xlsxwriter.Workbook, df: pd.DataFrame, fmts: dict) -> None:
     ws = workbook.add_worksheet("Alertas")
     alertas = df[
         (df["fonte"] != "BOTH") |
         (df["divergencias"].notna() & (df["divergencias"] != ""))
     ].copy()
-    _write_sheet(ws, alertas)
+    _write_sheet(ws, alertas, fmts)
 
 
-def _write_section(ws, start_row: int, title: str, headers: tuple, data: list) -> int:
-    ws.write(start_row, 0, title)
+def _write_section(ws, start_row: int, title: str, headers: tuple, data: list, fmts: dict) -> int:
+    ws.write(start_row, 0, title, fmts["section_title"])
     for col, header in enumerate(headers):
-        ws.write(start_row + 1, col, header)
+        ws.write(start_row + 1, col, header, fmts["subheader"])
     for offset, values in enumerate(data, start=2):
         for col, val in enumerate(values):
             ws.write(start_row + offset, col, val)
-    return start_row + len(data) + 3  # title + headers + data + blank line
+    return start_row + len(data) + 3
 
 
-def _write_sheet(ws, df: pd.DataFrame) -> None:
-    for col_idx, header in enumerate(DETAIL_COLUMNS.values()):
-        ws.write(0, col_idx, header)
+def _write_sheet(ws, df: pd.DataFrame, fmts: dict) -> None:
+    cols = list(DETAIL_COLUMNS.keys())
+    headers = list(DETAIL_COLUMNS.values())
 
-    for row_idx, (_, row) in enumerate(df[list(DETAIL_COLUMNS.keys())].iterrows(), start=1):
-        for col_idx, val in enumerate(row):
-            ws.write(row_idx, col_idx, _cell_value(val))
+    _set_col_widths(ws, df, cols, headers)
+
+    for col_idx, header in enumerate(headers):
+        ws.write(0, col_idx, header, fmts["header"])
+
+    for row_idx, (_, row_data) in enumerate(df[cols].iterrows(), start=1):
+        row_fmt = _row_format(row_data, fmts)
+        for col_idx, val in enumerate(row_data):
+            ws.write(row_idx, col_idx, _cell_value(val), row_fmt)
+
+
+def _set_col_widths(ws, df: pd.DataFrame, cols: list, headers: list) -> None:
+    for col_idx, (col, header) in enumerate(zip(cols, headers)):
+        max_data = max((len(str(_cell_value(v))) for v in df[col]), default=0)
+        width = min(max(len(header), max_data) + 2, 50)
+        ws.set_column(col_idx, col_idx, width)
+
+
+def _row_format(row_data: pd.Series, fmts: dict):
+    divs = str(row_data.get("divergencias") or "")
+    fonte = str(row_data.get("fonte") or "")
+    if "value_divergent" in divs:
+        return fmts["alert_value"]
+    if "name_divergent" in divs or "ans_divergent" in divs:
+        return fmts["alert_name"]
+    if fonte != "BOTH":
+        return fmts["alert_source"]
+    return None
 
 
 def _cell_value(val):
