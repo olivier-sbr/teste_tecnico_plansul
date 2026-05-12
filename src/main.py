@@ -1,13 +1,7 @@
 import pandas as pd
 from unidecode import unidecode
 
-
-def load_excel(path: str) -> pd.DataFrame:
-    return pd.read_excel(path)
-
-
-def load_csv(path: str) -> pd.DataFrame:
-    return pd.read_csv(path, sep=";", encoding="utf-8")
+from reader import load_excel, load_csv
 
 
 def normalize_name(name: str) -> str:
