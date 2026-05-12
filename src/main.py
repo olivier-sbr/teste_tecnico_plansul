@@ -1,7 +1,9 @@
 import logging
 import re
+from typing import Optional
 
 import ftfy
+from rapidfuzz import fuzz
 from unidecode import unidecode
 
 from reader import load_excel, load_csv
@@ -21,6 +23,22 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+
+
+MATCH_THRESHOLD = 80
+MATCH_MIN_GAP = 10
+
+
+def _score(filename_norm: str, patient: str) -> float:
+    return 0.6 * fuzz.token_set_ratio(filename_norm, patient) + 0.4 * fuzz.partial_ratio(filename_norm, patient)
+
+
+def match_pdf_to_patient(filename_norm: str, patient_names: list[str]) -> Optional[str]:
+    scores = sorted([(p, _score(filename_norm, p)) for p in patient_names], key=lambda x: x[1], reverse=True)
+    top1, top2 = scores[0], scores[1]
+    if top1[1] < MATCH_THRESHOLD or (top1[1] - top2[1]) < MATCH_MIN_GAP:
+        return None
+    return top1[0]
 
 
 def normalize_filename(filename: str) -> str:
@@ -57,4 +75,3 @@ if __name__ == "__main__":
     logger.info("classificando divergencias por linha")
     df = classify_divergences(df)
 
-   
