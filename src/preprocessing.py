@@ -7,6 +7,7 @@ def normalize_name(name: str) -> str:
 
 
 def invert_name(name: str) -> str:
+    name = name.strip(" ,")
     parts = name.split(", ", 1)
     return f"{parts[1]} {parts[0]}" if len(parts) == 2 else name
 
