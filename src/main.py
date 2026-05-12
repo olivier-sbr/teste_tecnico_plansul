@@ -39,6 +39,26 @@ def log_value_divergences(df: pd.DataFrame) -> None:
         )
 
 
+def log_name_divergences(df: pd.DataFrame) -> None:
+    both = df[df["fonte"] == "BOTH"]
+    divergentes = both[both["paciente_norm"] != both["nome_beneficiario_norm"]]
+    for _, row in divergentes.iterrows():
+        logger.warning(
+            f"divergencia de nome: {row['id_cobranca']} | "
+            f"excel={row['paciente']} | csv={row['nome_beneficiario']}"
+        )
+
+
+def log_ans_divergences(df: pd.DataFrame) -> None:
+    both = df[df["fonte"] == "BOTH"]
+    divergentes = both[both["registro_ans"] != both["ans"]]
+    for _, row in divergentes.iterrows():
+        logger.warning(
+            f"divergencia de ANS: {row['id_cobranca']} | "
+            f"excel={row['registro_ans']} | csv={row['ans']}"
+        )
+
+
 if __name__ == "__main__":
     logger.info("carregando dados")
     df_excel = load_excel("data/cobrancas_internas.xlsx")
@@ -58,4 +78,8 @@ if __name__ == "__main__":
 
     logger.info("detectando divergencias de valor")
     log_value_divergences(df)
+
+    logger.info("detectando divergencias de nome e ANS")
+    log_name_divergences(df)
+    log_ans_divergences(df)
 
