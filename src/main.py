@@ -1,6 +1,7 @@
 import logging
 import re
 
+import ftfy
 from unidecode import unidecode
 
 from reader import load_excel, load_csv
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 def normalize_filename(filename: str) -> str:
     name = filename.removesuffix(".pdf")
+    name = ftfy.fix_text(name)
     name = re.sub(r"[_\-\.]", " ", name)
     return unidecode(name).upper()
 
