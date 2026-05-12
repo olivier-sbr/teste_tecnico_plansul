@@ -1,4 +1,7 @@
 import logging
+import re
+
+from unidecode import unidecode
 
 from reader import load_excel, load_csv
 from preprocessing import normalize_excel, normalize_csv
@@ -17,6 +20,12 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+
+
+def normalize_filename(filename: str) -> str:
+    name = filename.removesuffix(".pdf")
+    name = re.sub(r"[_\-\.]", " ", name)
+    return unidecode(name).upper()
 
 
 if __name__ == "__main__":
@@ -46,3 +55,4 @@ if __name__ == "__main__":
     logger.info("classificando divergencias por linha")
     df = classify_divergences(df)
 
+   
