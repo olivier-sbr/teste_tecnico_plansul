@@ -59,6 +59,32 @@ def log_ans_divergences(df: pd.DataFrame) -> None:
         )
 
 
+def classificar_divergencias(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+
+    both = df["fonte"] == "BOTH"
+    delta = abs(df["valor"] - df["vl_liquido"] - df["vl_glosa"])
+    valor_diverge = both & (delta > 0.25)
+    nome_diverge = both & (df["paciente_norm"] != df["nome_beneficiario_norm"])
+    ans_diverge = both & (df["registro_ans"] != df["ans"])
+    fonte_unica = ~both
+
+    def get_divergencias(row):
+        items = []
+        if fonte_unica[row.name]:
+            items.append(f"fonte_unica:{row['fonte']}")
+        if valor_diverge[row.name]:
+            items.append("valor_divergente")
+        if nome_diverge[row.name]:
+            items.append("nome_divergente")
+        if ans_diverge[row.name]:
+            items.append("ans_divergente")
+        return "; ".join(items)
+
+    df["divergencias"] = df.apply(get_divergencias, axis=1)
+    return df
+
+
 if __name__ == "__main__":
     logger.info("carregando dados")
     df_excel = load_excel("data/cobrancas_internas.xlsx")
@@ -82,4 +108,7 @@ if __name__ == "__main__":
     logger.info("detectando divergencias de nome e ANS")
     log_name_divergences(df)
     log_ans_divergences(df)
+
+    logger.info("classificando divergencias por linha")
+    df = classificar_divergencias(df)
 
