@@ -27,6 +27,18 @@ def log_single_source_records(df: pd.DataFrame) -> None:
         logger.warning(f"cobranca em fonte unica: {row['id_cobranca']} | fonte={row['fonte']}")
 
 
+def log_value_divergences(df: pd.DataFrame) -> None:
+    both = df[df["fonte"] == "BOTH"].copy()
+    both["delta"] = abs(both["valor"] - both["vl_liquido"] - both["vl_glosa"])
+    divergentes = both[both["delta"] > 0.25]
+    for _, row in divergentes.iterrows():
+        logger.warning(
+            f"divergencia de valor: {row['id_cobranca']} | "
+            f"excel={row['valor']} | csv_liquido={row['vl_liquido']} | "
+            f"glosa={row['vl_glosa']} | delta={row['delta']:.2f}"
+        )
+
+
 if __name__ == "__main__":
     logger.info("carregando dados")
     df_excel = load_excel("data/cobrancas_internas.xlsx")
@@ -43,4 +55,7 @@ if __name__ == "__main__":
 
     logger.info("detectando divergencias de fonte")
     log_single_source_records(df)
+
+    logger.info("detectando divergencias de valor")
+    log_value_divergences(df)
 
