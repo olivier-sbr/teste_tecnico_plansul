@@ -1,8 +1,15 @@
 import logging
-import pandas as pd
 
 from reader import load_excel, load_csv
 from preprocessing import normalize_excel, normalize_csv
+from sourcemerger import (
+    merge_sources,
+    log_single_source_records,
+    log_value_divergences,
+    log_name_divergences,
+    log_ans_divergences,
+    classify_divergences,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -10,79 +17,6 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
-
-
-def merge_sources(df_excel: pd.DataFrame, df_csv: pd.DataFrame) -> pd.DataFrame:
-    df = pd.merge(df_excel, df_csv, on="id_cobranca", how="outer", indicator=True)
-    df["fonte"] = df["_merge"].map({
-        "both": "BOTH",
-        "left_only": "EXCEL_ONLY",
-        "right_only": "CSV_ONLY",
-    })
-    return df.drop(columns="_merge")
-
-
-def log_single_source_records(df: pd.DataFrame) -> None:
-    for _, row in df[df["fonte"] != "BOTH"].iterrows():
-        logger.warning(f"cobranca em fonte unica: {row['id_cobranca']} | fonte={row['fonte']}")
-
-
-def log_value_divergences(df: pd.DataFrame) -> None:
-    both = df[df["fonte"] == "BOTH"].copy()
-    both["delta"] = abs(both["valor"] - both["vl_liquido"] - both["vl_glosa"])
-    divergentes = both[both["delta"] > 0.25]
-    for _, row in divergentes.iterrows():
-        logger.warning(
-            f"divergencia de valor: {row['id_cobranca']} | "
-            f"excel={row['valor']} | csv_liquido={row['vl_liquido']} | "
-            f"glosa={row['vl_glosa']} | delta={row['delta']:.2f}"
-        )
-
-
-def log_name_divergences(df: pd.DataFrame) -> None:
-    both = df[df["fonte"] == "BOTH"]
-    divergentes = both[both["paciente_norm"] != both["nome_beneficiario_norm"]]
-    for _, row in divergentes.iterrows():
-        logger.warning(
-            f"divergencia de nome: {row['id_cobranca']} | "
-            f"excel={row['paciente']} | csv={row['nome_beneficiario']}"
-        )
-
-
-def log_ans_divergences(df: pd.DataFrame) -> None:
-    both = df[df["fonte"] == "BOTH"]
-    divergentes = both[both["registro_ans"] != both["ans"]]
-    for _, row in divergentes.iterrows():
-        logger.warning(
-            f"divergencia de ANS: {row['id_cobranca']} | "
-            f"excel={row['registro_ans']} | csv={row['ans']}"
-        )
-
-
-def classificar_divergencias(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-
-    both = df["fonte"] == "BOTH"
-    delta = abs(df["valor"] - df["vl_liquido"] - df["vl_glosa"])
-    valor_diverge = both & (delta > 0.25)
-    nome_diverge = both & (df["paciente_norm"] != df["nome_beneficiario_norm"])
-    ans_diverge = both & (df["registro_ans"] != df["ans"])
-    fonte_unica = ~both
-
-    def get_divergencias(row):
-        items = []
-        if fonte_unica[row.name]:
-            items.append(f"fonte_unica:{row['fonte']}")
-        if valor_diverge[row.name]:
-            items.append("valor_divergente")
-        if nome_diverge[row.name]:
-            items.append("nome_divergente")
-        if ans_diverge[row.name]:
-            items.append("ans_divergente")
-        return "; ".join(items)
-
-    df["divergencias"] = df.apply(get_divergencias, axis=1)
-    return df
 
 
 if __name__ == "__main__":
@@ -97,9 +31,9 @@ if __name__ == "__main__":
 
     logger.info("consolidando dataset")
     df = merge_sources(df_excel, df_csv)
-    logger.info(f"dataset consolidado: {len(df)} linhas | BOTH={len(df[df.fonte=='BOTH'])} CSV_ONLY={len(df[df.fonte=='CSV_ONLY'])} EXCEL_ONLY={len(df[df.fonte=='EXCEL_ONLY'])}")
+    logger.info(f"consolidado: {len(df)} linhas | BOTH={len(df[df.fonte=='BOTH'])} CSV_ONLY={len(df[df.fonte=='CSV_ONLY'])} EXCEL_ONLY={len(df[df.fonte=='EXCEL_ONLY'])}")
 
-    logger.info("detectando divergencias de fonte")
+    logger.info("detectando registros em fonte unica")
     log_single_source_records(df)
 
     logger.info("detectando divergencias de valor")
@@ -110,5 +44,5 @@ if __name__ == "__main__":
     log_ans_divergences(df)
 
     logger.info("classificando divergencias por linha")
-    df = classificar_divergencias(df)
+    df = classify_divergences(df)
 
