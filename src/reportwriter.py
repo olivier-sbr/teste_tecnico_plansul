@@ -102,6 +102,8 @@ def _write_resumo(workbook: xlsxwriter.Workbook, df: pd.DataFrame, pdf_counts: d
 def _write_detalhamento(workbook: xlsxwriter.Workbook, df: pd.DataFrame, fmts: dict) -> None:
     ws = workbook.add_worksheet("Detalhamento")
     _write_sheet(ws, df, fmts)
+    ws.freeze_panes(1, 0)
+    ws.autofilter(0, 0, len(df), len(DETAIL_COLUMNS) - 1)
 
 
 def _write_alertas(workbook: xlsxwriter.Workbook, df: pd.DataFrame, fmts: dict) -> None:
@@ -111,6 +113,8 @@ def _write_alertas(workbook: xlsxwriter.Workbook, df: pd.DataFrame, fmts: dict) 
         (df["divergencias"].notna() & (df["divergencias"] != ""))
     ].copy()
     _write_sheet(ws, alertas, fmts)
+    ws.freeze_panes(1, 0)
+    ws.autofilter(0, 0, len(alertas), len(DETAIL_COLUMNS) - 1)
 
 
 def _write_legend(ws, start_row: int, fmts: dict) -> None:
@@ -132,6 +136,8 @@ def _write_sem_laudo(workbook: xlsxwriter.Workbook, df: pd.DataFrame, fmts: dict
     ws = workbook.add_worksheet("Sem Laudo")
     sem_laudo = df[df["pdf_renomeado"].isna()].copy()
     _write_sheet(ws, sem_laudo, fmts)
+    ws.freeze_panes(1, 0)
+    ws.autofilter(0, 0, len(sem_laudo), len(DETAIL_COLUMNS) - 1)
 
 
 def _write_section(ws, start_row: int, title: str, headers: tuple, data: list, fmts: dict) -> int:
