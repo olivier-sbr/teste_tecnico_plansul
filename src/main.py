@@ -22,6 +22,11 @@ def merge_sources(df_excel: pd.DataFrame, df_csv: pd.DataFrame) -> pd.DataFrame:
     return df.drop(columns="_merge")
 
 
+def log_single_source_records(df: pd.DataFrame) -> None:
+    for _, row in df[df["fonte"] != "BOTH"].iterrows():
+        logger.warning(f"cobranca em fonte unica: {row['id_cobranca']} | fonte={row['fonte']}")
+
+
 if __name__ == "__main__":
     logger.info("carregando dados")
     df_excel = load_excel("data/cobrancas_internas.xlsx")
@@ -35,4 +40,7 @@ if __name__ == "__main__":
     logger.info("consolidando dataset")
     df = merge_sources(df_excel, df_csv)
     logger.info(f"dataset consolidado: {len(df)} linhas | BOTH={len(df[df.fonte=='BOTH'])} CSV_ONLY={len(df[df.fonte=='CSV_ONLY'])} EXCEL_ONLY={len(df[df.fonte=='EXCEL_ONLY'])}")
+
+    logger.info("detectando divergencias de fonte")
+    log_single_source_records(df)
 
