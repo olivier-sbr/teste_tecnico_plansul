@@ -45,6 +45,7 @@ def generate_report(df: pd.DataFrame, pdf_counts: dict, output_dir: str = "outpu
     _write_resumo(workbook, df, pdf_counts, fmts)
     _write_detalhamento(workbook, df, fmts)
     _write_alertas(workbook, df, fmts)
+    _write_sem_laudo(workbook, df, fmts)
     workbook.close()
 
     return filepath
@@ -58,6 +59,7 @@ def _create_formats(workbook: xlsxwriter.Workbook) -> dict:
         "alert_value":   workbook.add_format({"bg_color": "#FFCCCC"}),
         "alert_name":    workbook.add_format({"bg_color": "#FFE0CC"}),
         "alert_source":  workbook.add_format({"bg_color": "#FFFFCC"}),
+        "sem_laudo":     workbook.add_format({"bg_color": "#F2F2F2"}),
     }
 
 
@@ -89,10 +91,12 @@ def _write_resumo(workbook: xlsxwriter.Workbook, df: pd.DataFrame, pdf_counts: d
         ("Valor líquido total", round(float(df["vl_liquido"].sum()), 2)),
     ], fmts)
 
-    _write_section(ws, row, "LAUDOS", ("Situação", "Quantidade"), [
+    row = _write_section(ws, row, "LAUDOS", ("Situação", "Quantidade"), [
         *laudos_rows,
         ("Total processado", sum(v for _, v in laudos_rows)),
     ], fmts)
+
+    _write_legend(ws, row, fmts)
 
 
 def _write_detalhamento(workbook: xlsxwriter.Workbook, df: pd.DataFrame, fmts: dict) -> None:
@@ -107,6 +111,27 @@ def _write_alertas(workbook: xlsxwriter.Workbook, df: pd.DataFrame, fmts: dict) 
         (df["divergencias"].notna() & (df["divergencias"] != ""))
     ].copy()
     _write_sheet(ws, alertas, fmts)
+
+
+def _write_legend(ws, start_row: int, fmts: dict) -> None:
+    ws.write(start_row, 0, "LEGENDA DE CORES", fmts["section_title"])
+    ws.write(start_row + 1, 0, "Cor", fmts["subheader"])
+    ws.write(start_row + 1, 1, "Significado", fmts["subheader"])
+    legend = [
+        ("alert_value",  "Divergência de valor"),
+        ("alert_name",   "Divergência de nome ou ANS"),
+        ("alert_source", "Cobrança em fonte única"),
+        ("sem_laudo",    "Cobrança sem laudo vinculado"),
+    ]
+    for offset, (fmt_key, label) in enumerate(legend, start=2):
+        ws.write(start_row + offset, 0, "", fmts[fmt_key])
+        ws.write(start_row + offset, 1, label)
+
+
+def _write_sem_laudo(workbook: xlsxwriter.Workbook, df: pd.DataFrame, fmts: dict) -> None:
+    ws = workbook.add_worksheet("Sem Laudo")
+    sem_laudo = df[df["pdf_renomeado"].isna()].copy()
+    _write_sheet(ws, sem_laudo, fmts)
 
 
 def _write_section(ws, start_row: int, title: str, headers: tuple, data: list, fmts: dict) -> int:
@@ -144,12 +169,15 @@ def _set_col_widths(ws, df: pd.DataFrame, cols: list, headers: list) -> None:
 def _row_format(row_data: pd.Series, fmts: dict):
     divs = str(row_data.get("divergencias") or "")
     fonte = str(row_data.get("fonte") or "")
+    pdf = row_data.get("pdf_renomeado")
     if "value_divergent" in divs:
         return fmts["alert_value"]
     if "name_divergent" in divs or "ans_divergent" in divs:
         return fmts["alert_name"]
     if fonte != "BOTH":
         return fmts["alert_source"]
+    if pd.isna(pdf) or pdf == "":
+        return fmts["sem_laudo"]
     return None
 
 
