@@ -1,5 +1,7 @@
 import logging
 
+from dotenv import load_dotenv
+
 from reader import load_excel, load_csv
 from preprocessing import normalize_excel, normalize_csv
 from sourcemerger import (
@@ -12,6 +14,7 @@ from sourcemerger import (
 )
 from pdfmapper import rename_pdfs
 from reportwriter import generate_report
+from emailsender import send_report
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 
 if __name__ == "__main__":
+    load_dotenv()
+
     logger.info("carregando dados")
     df_excel = load_excel("data/cobrancas_internas.xlsx")
     df_csv = load_csv("data/cobrancas_convenio.csv")
@@ -55,3 +60,7 @@ if __name__ == "__main__":
     logger.info("gerando relatorio")
     report_path = generate_report(df, pdf_counts)
     logger.info(f"relatorio gerado: {report_path}")
+
+    logger.info("enviando relatorio por email")
+    send_report(report_path, df, pdf_counts)
+
