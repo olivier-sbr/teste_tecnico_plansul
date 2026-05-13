@@ -87,7 +87,9 @@ def rename_pdfs(df: pd.DataFrame) -> dict[str, str]:
         id_cob = row["id_cobranca"]
         mmyyyy = row["dt_realizacao"].strftime("%m%Y")
         dest_name = f"{cpf}-{nome}-{id_cob}-{mmyyyy}.pdf"
-        dest_path = os.path.join("output/laudos_processados", dest_name)
+        patient_dir = os.path.join("output/laudos_processados", patient.replace(" ", "_"))
+        os.makedirs(patient_dir, exist_ok=True)
+        dest_path = os.path.join(patient_dir, dest_name)
 
         if os.path.exists(dest_path):
             logger.warning(f"destino ja existe, pulando: {pdf} -> {dest_name}")
