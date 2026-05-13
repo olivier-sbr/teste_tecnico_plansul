@@ -4,7 +4,6 @@ venv/
 __pycache__/
 *.pyc
 
-data/*
 junior-automation-dev-assignment-main/*
 
 output/*
