@@ -32,7 +32,11 @@ def send_report(report_path: str) -> None:
 
     with smtplib.SMTP(host, port) as smtp:
         smtp.ehlo()
-        smtp.starttls()
+        try:
+            smtp.starttls()
+            smtp.ehlo()
+        except smtplib.SMTPNotSupportedError:
+            logger.warning("servidor nao suporta STARTTLS, conexao sem criptografia")
         smtp.login(user, password)
         smtp.sendmail(user, to, msg.as_string())
 
