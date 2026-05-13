@@ -7,6 +7,7 @@ from typing import Optional
 
 import ftfy
 import pandas as pd
+import pdfplumber
 from rapidfuzz import fuzz
 from unidecode import unidecode
 
@@ -14,6 +15,8 @@ logger = logging.getLogger(__name__)
 
 MATCH_THRESHOLD = 80
 MATCH_MIN_GAP = 10
+
+_COB_RE = re.compile(r'\bCOB\d+\b', re.IGNORECASE)
 
 
 def _score(filename_norm: str, patient: str) -> float:
@@ -26,6 +29,22 @@ def match_pdf_to_patient(filename_norm: str, patient_names: list[str]) -> Option
     if top1[1] < MATCH_THRESHOLD or (top1[1] - top2[1]) < MATCH_MIN_GAP:
         return None
     return top1[0]
+
+
+def _extract_cob_from_pdf(path: str) -> Optional[str]:
+    """Lê o texto do PDF e retorna o primeiro COB encontrado (ex: 'COB041').
+
+    Retorna None se o PDF não contiver texto extraível ou se nenhum COB for encontrado.
+    Erros de leitura são logados como warning — o rename prossegue sem validação de conteúdo.
+    """
+    try:
+        with pdfplumber.open(path) as pdf:
+            text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+        m = _COB_RE.search(text)
+        return m.group(0).upper() if m else None
+    except Exception as exc:
+        logger.warning(f"erro ao ler conteudo do PDF {path}: {exc}")
+        return None
 
 
 def normalize_filename(filename: str) -> str:
@@ -84,7 +103,7 @@ def _resolve_mappings(patient_charges: dict, patient_names: list[str]) -> list[d
     return results
 
 
-def rename_pdfs(df: pd.DataFrame) -> tuple[dict, dict, list]:
+def rename_pdfs(df: pd.DataFrame) -> tuple[dict, dict, list, list]:
     os.makedirs("output/laudos_processados", exist_ok=True)
 
     # CSV é a fonte de verdade: só considera registros com dados do CSV
@@ -107,9 +126,11 @@ def rename_pdfs(df: pd.DataFrame) -> tuple[dict, dict, list]:
 
     renamed: dict[str, str] = {}
     conflicts: list[dict] = []
+    unmatched: list[dict] = []
     counts = {
         "renomeados": 0, "sem_cobranca_na_data": 0, "sem_data": 0,
-        "nao_identificados": 0, "destino_existente": 0, "ambiguos": 0, "conflitos": 0,
+        "nao_identificados": 0, "destino_existente": 0, "ambiguos": 0,
+        "conflitos": 0, "cob_divergente": 0,
     }
 
     for m in mappings:
@@ -119,24 +140,54 @@ def rename_pdfs(df: pd.DataFrame) -> tuple[dict, dict, list]:
         if status == "nao_identificado":
             logger.warning(f"laudo nao identificado: {pdf}")
             counts["nao_identificados"] += 1
+            unmatched.append({
+                "pdf": pdf,
+                "paciente": "",
+                "data": "",
+                "id_cobranca": "",
+                "motivo": "Paciente não identificado no filename",
+            })
 
         elif status == "sem_data":
             logger.warning(f"laudo sem data no nome: {pdf} | paciente={m['patient']}")
             counts["sem_data"] += 1
+            unmatched.append({
+                "pdf": pdf,
+                "paciente": m["patient"],
+                "data": "",
+                "id_cobranca": "",
+                "motivo": "Data não encontrada no filename",
+            })
 
         elif status == "sem_cobranca_na_data":
-            logger.warning(f"laudo sem cobranca na data: {pdf} | paciente={m['patient']} | data={m['day']:02d}/{m['month']:02d}")
+            data_str = f"{m['day']:02d}/{m['month']:02d}"
+            logger.warning(f"laudo sem cobranca na data: {pdf} | paciente={m['patient']} | data={data_str}")
             counts["sem_cobranca_na_data"] += 1
+            unmatched.append({
+                "pdf": pdf,
+                "paciente": m["patient"],
+                "data": data_str,
+                "id_cobranca": "",
+                "motivo": f"Sem cobrança em {data_str} para este paciente",
+            })
 
         elif status == "ambiguo":
             logger.warning(f"laudo ambiguo, nao renomeado: {pdf} | paciente={m['patient']} | candidatos={m['candidatos']}")
             counts["ambiguos"] += 1
+            candidatos_str = ", ".join(f"{cob} ({svc})" for cob, svc in m["candidatos"])
+            unmatched.append({
+                "pdf": pdf,
+                "paciente": m["patient"],
+                "data": "",
+                "id_cobranca": "",
+                "motivo": f"Ambíguo: múltiplas cobranças na mesma data ({candidatos_str})",
+            })
 
         elif status == "ok":
             row = m["row"]
             id_cob = row["id_cobranca"]
 
-            # Conflito: outro PDF já resolveu para esta cobrança — não renomeia nenhum
+            # Conflito: outro PDF já resolveu para esta cobrança — tratado no loop de conflitos abaixo
             if id_cob in conflicting_cobs:
                 continue
 
@@ -148,13 +199,30 @@ def rename_pdfs(df: pd.DataFrame) -> tuple[dict, dict, list]:
             os.makedirs(patient_dir, exist_ok=True)
             dest_path = os.path.join(patient_dir, dest_name)
 
+            pdf_path = os.path.join("data/laudos", pdf)
+            cob_interno = _extract_cob_from_pdf(pdf_path)
+            if cob_interno is not None and cob_interno != id_cob:
+                logger.warning(
+                    f"COB interno diverge do esperado: {pdf} | "
+                    f"interno={cob_interno} | esperado={id_cob} | paciente={m['patient']}"
+                )
+                unmatched.append({
+                    "pdf": pdf,
+                    "paciente": m["patient"],
+                    "data": row["dt_realizacao"].strftime("%d/%m"),
+                    "id_cobranca": id_cob,
+                    "motivo": f"COB interno ({cob_interno}) diverge do esperado ({id_cob})",
+                })
+                counts["cob_divergente"] += 1
+                continue
+
             if os.path.exists(dest_path):
                 logger.warning(f"destino ja existe, pulando: {pdf} -> {dest_name}")
                 counts["destino_existente"] += 1
                 renamed[id_cob] = dest_name
                 continue
 
-            shutil.copy2(os.path.join("data/laudos", pdf), dest_path)
+            shutil.copy2(pdf_path, dest_path)
             logger.info(f"laudo renomeado: {pdf} -> {dest_name}")
             renamed[id_cob] = dest_name
             counts["renomeados"] += 1
@@ -173,6 +241,14 @@ def rename_pdfs(df: pd.DataFrame) -> tuple[dict, dict, list]:
             "pdfs": pdfs_list,
         })
         counts["conflitos"] += len(pdfs_list)
+        for e in entries:
+            unmatched.append({
+                "pdf": e["pdf"],
+                "paciente": patient,
+                "data": e["row"]["dt_realizacao"].strftime("%d/%m"),
+                "id_cobranca": cob,
+                "motivo": f"Conflito: outro PDF resolve para a mesma cobrança ({', '.join(pdfs_list)})",
+            })
 
     logger.info(
         f"laudos: {counts['renomeados']} renomeados | "
@@ -180,7 +256,8 @@ def rename_pdfs(df: pd.DataFrame) -> tuple[dict, dict, list]:
         f"{counts['sem_cobranca_na_data']} sem cobranca na data | "
         f"{counts['nao_identificados']} nao identificados | "
         f"{counts['ambiguos']} ambiguos | "
+        f"{counts['cob_divergente']} cob divergente | "
         f"{counts['conflitos']} em conflito | "
         f"{counts['destino_existente']} destino existente"
     )
-    return renamed, counts, conflicts
+    return renamed, counts, conflicts, unmatched

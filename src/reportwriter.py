@@ -30,7 +30,13 @@ DETAIL_COLUMNS = {
 logger = logging.getLogger(__name__)
 
 
-def generate_report(df: pd.DataFrame, pdf_counts: dict, pdf_conflicts: list, output_dir: str = "output") -> str:
+def generate_report(
+    df: pd.DataFrame,
+    pdf_counts: dict,
+    pdf_conflicts: list,
+    pdf_unmatched: list,
+    output_dir: str = "output",
+) -> str:
     missing = [col for col in DETAIL_COLUMNS if col not in df.columns]
     if missing:
         logger.error(f"relatorio abortado — colunas ausentes no dataset: {missing}")
@@ -46,6 +52,7 @@ def generate_report(df: pd.DataFrame, pdf_counts: dict, pdf_conflicts: list, out
     _write_detalhamento(workbook, df, fmts)
     _write_alertas(workbook, df, pdf_conflicts, fmts)
     _write_sem_laudo(workbook, df, fmts)
+    _write_laudos_nao_vinculados(workbook, pdf_unmatched, fmts)
     workbook.close()
 
     return filepath
@@ -71,12 +78,14 @@ def _write_resumo(workbook: xlsxwriter.Workbook, df: pd.DataFrame, pdf_counts: d
     fonte_counts = df["fonte"].value_counts()
 
     laudos_rows = [
-        ("Renomeados",            pdf_counts.get("renomeados", 0)),
+        ("Renomeados",                   pdf_counts.get("renomeados", 0)),
         ("Conflitos (nenhum renomeado)", pdf_counts.get("conflitos", 0)),
-        ("Destino já existente",  pdf_counts.get("destino_existente", 0)),
-        ("Sem data no filename",  pdf_counts.get("sem_data", 0)),
-        ("Sem cobrança na data",  pdf_counts.get("sem_cobranca_na_data", 0)),
-        ("Não identificados",     pdf_counts.get("nao_identificados", 0)),
+        ("Destino já existente",         pdf_counts.get("destino_existente", 0)),
+        ("Sem data no filename",         pdf_counts.get("sem_data", 0)),
+        ("Sem cobrança na data",         pdf_counts.get("sem_cobranca_na_data", 0)),
+        ("Ambíguos",                     pdf_counts.get("ambiguos", 0)),
+        ("COB interno divergente",       pdf_counts.get("cob_divergente", 0)),
+        ("Não identificados",            pdf_counts.get("nao_identificados", 0)),
     ]
 
     row = _write_section(ws, 0, "COBRANÇAS POR FONTE", ("Fonte", "Quantidade"), [
@@ -154,6 +163,24 @@ def _write_sem_laudo(workbook: xlsxwriter.Workbook, df: pd.DataFrame, fmts: dict
     _write_sheet(ws, sem_laudo, fmts)
     ws.freeze_panes(1, 0)
     ws.autofilter(0, 0, len(sem_laudo), len(DETAIL_COLUMNS) - 1)
+
+
+def _write_laudos_nao_vinculados(workbook: xlsxwriter.Workbook, unmatched: list, fmts: dict) -> None:
+    ws = workbook.add_worksheet("Laudos não vinculados")
+    headers = ["Arquivo", "Paciente", "Data", "ID Cobrança", "Motivo"]
+    col_widths = [40, 30, 12, 14, 60]
+    for col_idx, (h, w) in enumerate(zip(headers, col_widths)):
+        ws.set_column(col_idx, col_idx, w)
+        ws.write(0, col_idx, h, fmts["header"])
+    for row_idx, entry in enumerate(unmatched, start=1):
+        ws.write(row_idx, 0, entry["pdf"])
+        ws.write(row_idx, 1, entry["paciente"])
+        ws.write(row_idx, 2, entry["data"])
+        ws.write(row_idx, 3, entry["id_cobranca"])
+        ws.write(row_idx, 4, entry["motivo"])
+    ws.freeze_panes(1, 0)
+    if unmatched:
+        ws.autofilter(0, 0, len(unmatched), len(headers) - 1)
 
 
 def _write_section(ws, start_row: int, title: str, headers: tuple, data: list, fmts: dict) -> int:
