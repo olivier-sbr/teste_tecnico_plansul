@@ -95,8 +95,16 @@ def _resolve_mappings(patient_charges: dict, patient_names: list[str]) -> list[d
             if scored[0][1] - scored[1][1] >= 10:
                 results.append({"pdf": pdf, "status": "ok", "patient": patient, "row": scored[0][0]})
             else:
-                candidatos = [(r["id_cobranca"], r["descricao_servico"]) for r, _ in scored]
-                results.append({"pdf": pdf, "status": "ambiguo", "patient": patient, "candidatos": candidatos})
+                cob_interno = _extract_cob_from_pdf(os.path.join("data/laudos", pdf))
+                resolved = False
+                if cob_interno:
+                    matching = [r for r, _ in scored if r["id_cobranca"] == cob_interno]
+                    if len(matching) == 1:
+                        results.append({"pdf": pdf, "status": "ok", "patient": patient, "row": matching[0]})
+                        resolved = True
+                if not resolved:
+                    candidatos = [(r["id_cobranca"], r["descricao_servico"]) for r, _ in scored]
+                    results.append({"pdf": pdf, "status": "ambiguo", "patient": patient, "candidatos": candidatos})
         else:
             results.append({"pdf": pdf, "status": "ok", "patient": patient, "row": row.iloc[0]})
 
@@ -106,7 +114,6 @@ def _resolve_mappings(patient_charges: dict, patient_names: list[str]) -> list[d
 def rename_pdfs(df: pd.DataFrame) -> tuple[dict, dict, list, list]:
     os.makedirs("output/laudos_processados", exist_ok=True)
 
-    # CSV é a fonte de verdade: só considera registros com dados do CSV
     csv_rows = df[df["nome_beneficiario_norm"].notna()]
     patient_charges = {
         patient: group.sort_values("id_cobranca")
@@ -116,11 +123,18 @@ def rename_pdfs(df: pd.DataFrame) -> tuple[dict, dict, list, list]:
 
     mappings = _resolve_mappings(patient_charges, patient_names)
 
-    # Detecta conflitos: mais de um PDF resolvendo para a mesma cobrança
     cob_to_entries: dict[str, list] = defaultdict(list)
     for m in mappings:
-        if m["status"] == "ok":
-            cob_to_entries[m["row"]["id_cobranca"]].append(m)
+        if m["status"] != "ok":
+            continue
+        row = m["row"]
+        id_cob = row["id_cobranca"]
+        cob_interno = _extract_cob_from_pdf(os.path.join("data/laudos", m["pdf"]))
+        if cob_interno is not None and cob_interno != id_cob:
+            m["status"] = "cob_divergente"
+            m["cob_interno"] = cob_interno
+        else:
+            cob_to_entries[id_cob].append(m)
 
     conflicting_cobs = {cob for cob, entries in cob_to_entries.items() if len(entries) > 1}
 
@@ -172,22 +186,36 @@ def rename_pdfs(df: pd.DataFrame) -> tuple[dict, dict, list, list]:
             })
 
         elif status == "ambiguo":
-            logger.warning(f"laudo ambiguo, nao renomeado: {pdf} | paciente={m['patient']} | candidatos={m['candidatos']}")
+            candidatos_fmt = ", ".join(f"{cob} ({svc})" for cob, svc in m["candidatos"])
+            logger.warning(f"laudo ambiguo, nao renomeado: {pdf} | paciente={m['patient']} | candidatos={candidatos_fmt}")
             counts["ambiguos"] += 1
-            candidatos_str = ", ".join(f"{cob} ({svc})" for cob, svc in m["candidatos"])
             unmatched.append({
                 "pdf": pdf,
                 "paciente": m["patient"],
                 "data": "",
                 "id_cobranca": "",
-                "motivo": f"Ambíguo: múltiplas cobranças na mesma data ({candidatos_str})",
+                "motivo": f"Ambíguo: múltiplas cobranças na mesma data ({candidatos_fmt})",
+            })
+
+        elif status == "cob_divergente":
+            row = m["row"]
+            logger.warning(
+                f"COB interno diverge do esperado: {pdf} | "
+                f"interno={m['cob_interno']} | esperado={row['id_cobranca']} | paciente={m['patient']}"
+            )
+            counts["cob_divergente"] += 1
+            unmatched.append({
+                "pdf": pdf,
+                "paciente": m["patient"],
+                "data": row["dt_realizacao"].strftime("%d/%m"),
+                "id_cobranca": row["id_cobranca"],
+                "motivo": f"COB interno ({m['cob_interno']}) diverge do esperado ({row['id_cobranca']})",
             })
 
         elif status == "ok":
             row = m["row"]
             id_cob = row["id_cobranca"]
 
-            # Conflito: outro PDF já resolveu para esta cobrança — tratado no loop de conflitos abaixo
             if id_cob in conflicting_cobs:
                 continue
 
@@ -199,30 +227,13 @@ def rename_pdfs(df: pd.DataFrame) -> tuple[dict, dict, list, list]:
             os.makedirs(patient_dir, exist_ok=True)
             dest_path = os.path.join(patient_dir, dest_name)
 
-            pdf_path = os.path.join("data/laudos", pdf)
-            cob_interno = _extract_cob_from_pdf(pdf_path)
-            if cob_interno is not None and cob_interno != id_cob:
-                logger.warning(
-                    f"COB interno diverge do esperado: {pdf} | "
-                    f"interno={cob_interno} | esperado={id_cob} | paciente={m['patient']}"
-                )
-                unmatched.append({
-                    "pdf": pdf,
-                    "paciente": m["patient"],
-                    "data": row["dt_realizacao"].strftime("%d/%m"),
-                    "id_cobranca": id_cob,
-                    "motivo": f"COB interno ({cob_interno}) diverge do esperado ({id_cob})",
-                })
-                counts["cob_divergente"] += 1
-                continue
-
             if os.path.exists(dest_path):
                 logger.warning(f"destino ja existe, pulando: {pdf} -> {dest_name}")
                 counts["destino_existente"] += 1
                 renamed[id_cob] = dest_name
                 continue
 
-            shutil.copy2(pdf_path, dest_path)
+            shutil.copy2(os.path.join("data/laudos", pdf), dest_path)
             logger.info(f"laudo renomeado: {pdf} -> {dest_name}")
             renamed[id_cob] = dest_name
             counts["renomeados"] += 1
