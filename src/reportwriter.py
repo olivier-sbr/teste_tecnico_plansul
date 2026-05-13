@@ -30,7 +30,7 @@ DETAIL_COLUMNS = {
 logger = logging.getLogger(__name__)
 
 
-def generate_report(df: pd.DataFrame, pdf_counts: dict, output_dir: str = "output") -> str:
+def generate_report(df: pd.DataFrame, pdf_counts: dict, pdf_conflicts: list, output_dir: str = "output") -> str:
     missing = [col for col in DETAIL_COLUMNS if col not in df.columns]
     if missing:
         logger.error(f"relatorio abortado — colunas ausentes no dataset: {missing}")
@@ -44,7 +44,7 @@ def generate_report(df: pd.DataFrame, pdf_counts: dict, output_dir: str = "outpu
     fmts = _create_formats(workbook)
     _write_resumo(workbook, df, pdf_counts, fmts)
     _write_detalhamento(workbook, df, fmts)
-    _write_alertas(workbook, df, fmts)
+    _write_alertas(workbook, df, pdf_conflicts, fmts)
     _write_sem_laudo(workbook, df, fmts)
     workbook.close()
 
@@ -72,6 +72,7 @@ def _write_resumo(workbook: xlsxwriter.Workbook, df: pd.DataFrame, pdf_counts: d
 
     laudos_rows = [
         ("Renomeados",            pdf_counts.get("renomeados", 0)),
+        ("Conflitos (nenhum renomeado)", pdf_counts.get("conflitos", 0)),
         ("Destino já existente",  pdf_counts.get("destino_existente", 0)),
         ("Sem data no filename",  pdf_counts.get("sem_data", 0)),
         ("Sem cobrança na data",  pdf_counts.get("sem_cobranca_na_data", 0)),
@@ -106,7 +107,7 @@ def _write_detalhamento(workbook: xlsxwriter.Workbook, df: pd.DataFrame, fmts: d
     ws.autofilter(0, 0, len(df), len(DETAIL_COLUMNS) - 1)
 
 
-def _write_alertas(workbook: xlsxwriter.Workbook, df: pd.DataFrame, fmts: dict) -> None:
+def _write_alertas(workbook: xlsxwriter.Workbook, df: pd.DataFrame, pdf_conflicts: list, fmts: dict) -> None:
     ws = workbook.add_worksheet("Alertas")
     alertas = df[
         (df["fonte"] != "BOTH") |
@@ -115,6 +116,21 @@ def _write_alertas(workbook: xlsxwriter.Workbook, df: pd.DataFrame, fmts: dict) 
     _write_sheet(ws, alertas, fmts)
     ws.freeze_panes(1, 0)
     ws.autofilter(0, 0, len(alertas), len(DETAIL_COLUMNS) - 1)
+
+    if pdf_conflicts:
+        _write_pdf_conflicts(ws, pdf_conflicts, len(alertas) + 3, fmts)
+
+
+def _write_pdf_conflicts(ws, conflicts: list, start_row: int, fmts: dict) -> None:
+    ws.write(start_row, 0, "CONFLITOS DE LAUDOS", fmts["section_title"])
+    headers = ["ID Cobrança", "Paciente", "Serviço (CSV)", "PDFs em Conflito"]
+    for col, h in enumerate(headers):
+        ws.write(start_row + 1, col, h, fmts["subheader"])
+    for offset, c in enumerate(conflicts, start=2):
+        ws.write(start_row + offset, 0, c["id_cobranca"])
+        ws.write(start_row + offset, 1, c["paciente"])
+        ws.write(start_row + offset, 2, c["descricao_servico"])
+        ws.write(start_row + offset, 3, ", ".join(c["pdfs"]), fmts["alert_value"])
 
 
 def _write_legend(ws, start_row: int, fmts: dict) -> None:

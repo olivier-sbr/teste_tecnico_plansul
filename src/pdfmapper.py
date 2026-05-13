@@ -2,6 +2,7 @@ import logging
 import os
 import re
 import shutil
+from collections import defaultdict
 from typing import Optional
 
 import ftfy
@@ -41,19 +42,8 @@ def _extract_day_month(filename: str) -> Optional[tuple[int, int]]:
     return None
 
 
-def rename_pdfs(df: pd.DataFrame) -> dict[str, str]:
-    os.makedirs("output/laudos_processados", exist_ok=True)
-
-    csv_rows = df[df["nome_beneficiario_norm"].notna()]
-    patient_charges = {
-        patient: group.sort_values("id_cobranca")
-        for patient, group in csv_rows.groupby("nome_beneficiario_norm")
-    }
-    patient_names = list(patient_charges.keys())
-
-    renamed: dict[str, str] = {}
-    counts = {"renomeados": 0, "sem_cobranca_na_data": 0, "sem_data": 0, "nao_identificados": 0, "destino_existente": 0}
-
+def _resolve_mappings(patient_charges: dict, patient_names: list[str]) -> list[dict]:
+    results = []
     for pdf in sorted(os.listdir("data/laudos")):
         if not pdf.endswith(".pdf"):
             continue
@@ -62,14 +52,12 @@ def rename_pdfs(df: pd.DataFrame) -> dict[str, str]:
         patient = match_pdf_to_patient(norm, patient_names)
 
         if patient is None:
-            logger.warning(f"laudo nao identificado: {pdf}")
-            counts["nao_identificados"] += 1
+            results.append({"pdf": pdf, "status": "nao_identificado"})
             continue
 
         date = _extract_day_month(pdf)
         if date is None:
-            logger.warning(f"laudo sem data no nome, cobranca indeterminada: {pdf} | paciente={patient}")
-            counts["sem_data"] += 1
+            results.append({"pdf": pdf, "status": "sem_data", "patient": patient})
             continue
 
         day, month = date
@@ -77,36 +65,122 @@ def rename_pdfs(df: pd.DataFrame) -> dict[str, str]:
         row = charges[(charges["dt_realizacao"].dt.day == day) & (charges["dt_realizacao"].dt.month == month)]
 
         if row.empty:
-            logger.warning(f"laudo sem cobranca na data: {pdf} | paciente={patient} | data={day:02d}/{month:02d}")
+            results.append({"pdf": pdf, "status": "sem_cobranca_na_data", "patient": patient, "day": day, "month": month})
+            continue
+
+        if len(row) > 1:
+            scored = sorted(
+                [(r, _score(norm, unidecode(r["descricao_servico"]).upper())) for _, r in row.iterrows()],
+                key=lambda x: x[1], reverse=True,
+            )
+            if scored[0][1] - scored[1][1] >= 10:
+                results.append({"pdf": pdf, "status": "ok", "patient": patient, "row": scored[0][0]})
+            else:
+                candidatos = [(r["id_cobranca"], r["descricao_servico"]) for r, _ in scored]
+                results.append({"pdf": pdf, "status": "ambiguo", "patient": patient, "candidatos": candidatos})
+        else:
+            results.append({"pdf": pdf, "status": "ok", "patient": patient, "row": row.iloc[0]})
+
+    return results
+
+
+def rename_pdfs(df: pd.DataFrame) -> tuple[dict, dict, list]:
+    os.makedirs("output/laudos_processados", exist_ok=True)
+
+    # CSV é a fonte de verdade: só considera registros com dados do CSV
+    csv_rows = df[df["nome_beneficiario_norm"].notna()]
+    patient_charges = {
+        patient: group.sort_values("id_cobranca")
+        for patient, group in csv_rows.groupby("nome_beneficiario_norm")
+    }
+    patient_names = list(patient_charges.keys())
+
+    mappings = _resolve_mappings(patient_charges, patient_names)
+
+    # Detecta conflitos: mais de um PDF resolvendo para a mesma cobrança
+    cob_to_entries: dict[str, list] = defaultdict(list)
+    for m in mappings:
+        if m["status"] == "ok":
+            cob_to_entries[m["row"]["id_cobranca"]].append(m)
+
+    conflicting_cobs = {cob for cob, entries in cob_to_entries.items() if len(entries) > 1}
+
+    renamed: dict[str, str] = {}
+    conflicts: list[dict] = []
+    counts = {
+        "renomeados": 0, "sem_cobranca_na_data": 0, "sem_data": 0,
+        "nao_identificados": 0, "destino_existente": 0, "ambiguos": 0, "conflitos": 0,
+    }
+
+    for m in mappings:
+        pdf = m["pdf"]
+        status = m["status"]
+
+        if status == "nao_identificado":
+            logger.warning(f"laudo nao identificado: {pdf}")
+            counts["nao_identificados"] += 1
+
+        elif status == "sem_data":
+            logger.warning(f"laudo sem data no nome: {pdf} | paciente={m['patient']}")
+            counts["sem_data"] += 1
+
+        elif status == "sem_cobranca_na_data":
+            logger.warning(f"laudo sem cobranca na data: {pdf} | paciente={m['patient']} | data={m['day']:02d}/{m['month']:02d}")
             counts["sem_cobranca_na_data"] += 1
-            continue
 
-        row = row.iloc[0]
-        cpf = str(row["cpf_beneficiario"]).replace(".", "").replace("-", "")
-        nome = patient.replace(" ", "")
-        id_cob = row["id_cobranca"]
-        mmyyyy = row["dt_realizacao"].strftime("%m%Y")
-        dest_name = f"{cpf}-{nome}-{id_cob}-{mmyyyy}.pdf"
-        patient_dir = os.path.join("output/laudos_processados", patient.replace(" ", "_"))
-        os.makedirs(patient_dir, exist_ok=True)
-        dest_path = os.path.join(patient_dir, dest_name)
+        elif status == "ambiguo":
+            logger.warning(f"laudo ambiguo, nao renomeado: {pdf} | paciente={m['patient']} | candidatos={m['candidatos']}")
+            counts["ambiguos"] += 1
 
-        if os.path.exists(dest_path):
-            logger.warning(f"destino ja existe, pulando: {pdf} -> {dest_name}")
-            counts["destino_existente"] += 1
+        elif status == "ok":
+            row = m["row"]
+            id_cob = row["id_cobranca"]
+
+            # Conflito: outro PDF já resolveu para esta cobrança — não renomeia nenhum
+            if id_cob in conflicting_cobs:
+                continue
+
+            cpf = str(row["cpf_beneficiario"]).replace(".", "").replace("-", "")
+            nome = m["patient"].replace(" ", "")
+            mmyyyy = row["dt_realizacao"].strftime("%m%Y")
+            dest_name = f"{cpf}-{nome}-{id_cob}-{mmyyyy}.pdf"
+            patient_dir = os.path.join("output/laudos_processados", m["patient"].replace(" ", "_"))
+            os.makedirs(patient_dir, exist_ok=True)
+            dest_path = os.path.join(patient_dir, dest_name)
+
+            if os.path.exists(dest_path):
+                logger.warning(f"destino ja existe, pulando: {pdf} -> {dest_name}")
+                counts["destino_existente"] += 1
+                renamed[id_cob] = dest_name
+                continue
+
+            shutil.copy2(os.path.join("data/laudos", pdf), dest_path)
+            logger.info(f"laudo renomeado: {pdf} -> {dest_name}")
             renamed[id_cob] = dest_name
-            continue
+            counts["renomeados"] += 1
 
-        shutil.copy2(os.path.join("data/laudos", pdf), dest_path)
-        logger.info(f"laudo renomeado: {pdf} -> {dest_name}")
-        renamed[id_cob] = dest_name
-        counts["renomeados"] += 1
+    for cob, entries in cob_to_entries.items():
+        if cob not in conflicting_cobs:
+            continue
+        pdfs_list = [e["pdf"] for e in entries]
+        patient = entries[0]["patient"]
+        servico = entries[0]["row"]["descricao_servico"]
+        logger.warning(f"conflito de laudos, nenhum renomeado: id_cobranca={cob} | paciente={patient} | laudos={pdfs_list}")
+        conflicts.append({
+            "id_cobranca": cob,
+            "paciente": patient,
+            "descricao_servico": servico,
+            "pdfs": pdfs_list,
+        })
+        counts["conflitos"] += len(pdfs_list)
 
     logger.info(
         f"laudos: {counts['renomeados']} renomeados | "
         f"{counts['sem_data']} sem data | "
         f"{counts['sem_cobranca_na_data']} sem cobranca na data | "
         f"{counts['nao_identificados']} nao identificados | "
+        f"{counts['ambiguos']} ambiguos | "
+        f"{counts['conflitos']} em conflito | "
         f"{counts['destino_existente']} destino existente"
     )
-    return renamed, counts
+    return renamed, counts, conflicts

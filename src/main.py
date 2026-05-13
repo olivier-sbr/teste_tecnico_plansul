@@ -54,11 +54,11 @@ if __name__ == "__main__":
     df = classify_divergences(df)
 
     logger.info("renomeando laudos")
-    renamed, pdf_counts = rename_pdfs(df)
+    renamed, pdf_counts, pdf_conflicts = rename_pdfs(df)
     df["pdf_renomeado"] = df["id_cobranca"].map(renamed)
 
     logger.info("gerando relatorio")
-    report_path = generate_report(df, pdf_counts)
+    report_path = generate_report(df, pdf_counts, pdf_conflicts)
     logger.info(f"relatorio gerado: {report_path}")
 
     logger.info("enviando relatorio por email")
