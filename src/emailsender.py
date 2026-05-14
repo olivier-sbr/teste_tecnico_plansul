@@ -178,11 +178,20 @@ def _build_html(df: pd.DataFrame, pdf_counts: dict, yyyymm: str) -> str:
 
 
 def send_report(report_path: str, df: pd.DataFrame, pdf_counts: dict) -> None:
-    user     = os.environ["EMAIL_USER"]
-    password = os.environ["EMAIL_PASSWORD"]
-    to       = os.environ["EMAIL_TO"]
+    user     = os.environ.get("EMAIL_USER")
+    password = os.environ.get("EMAIL_PASSWORD")
+    to       = os.environ.get("EMAIL_TO")
     host     = os.environ.get("EMAIL_HOST", "smtp.gmail.com")
     port     = int(os.environ.get("EMAIL_PORT", "587"))
+
+    missing = [k for k, v in {"EMAIL_USER": user, "EMAIL_PASSWORD": password, "EMAIL_TO": to}.items() if not v]
+    if missing:
+        logger.error(f"variaveis de ambiente ausentes: {', '.join(missing)}")
+        raise ValueError(f"variaveis ausentes: {', '.join(missing)}")
+
+    if "@" not in to:
+        logger.error(f"EMAIL_TO invalido: {to}")
+        raise ValueError(f"EMAIL_TO invalido: {to}")
 
     yyyymm  = os.path.basename(report_path).replace("relatorio_faturamento_", "").replace(".xlsx", "")
     subject = f"Relatório de Faturamento — {yyyymm}"
@@ -204,14 +213,25 @@ def send_report(report_path: str, df: pd.DataFrame, pdf_counts: dict) -> None:
     attachment["Content-Disposition"] = f'attachment; filename="{os.path.basename(report_path)}"'
     outer.attach(attachment)
 
-    with smtplib.SMTP(host, port) as smtp:
-        smtp.ehlo()
-        try:
-            smtp.starttls()
+    try:
+        with smtplib.SMTP(host, port) as smtp:
             smtp.ehlo()
-        except smtplib.SMTPNotSupportedError:
-            logger.warning("servidor nao suporta STARTTLS, conexao sem criptografia")
-        smtp.login(user, password)
-        smtp.sendmail(user, to, outer.as_string())
+            try:
+                smtp.starttls()
+                smtp.ehlo()
+            except smtplib.SMTPNotSupportedError:
+                logger.warning("servidor nao suporta STARTTLS, conexao sem criptografia")
+            try:
+                smtp.login(user, password)
+            except smtplib.SMTPAuthenticationError:
+                logger.error(f"credenciais invalidas para {user} em {host}:{port}")
+                raise
+            smtp.sendmail(user, to, outer.as_string())
+    except smtplib.SMTPRecipientsRefused:
+        logger.error(f"destinatario rejeitado pelo servidor: {to}")
+        raise
+    except smtplib.SMTPException as exc:
+        logger.error(f"erro SMTP ao enviar relatorio: {exc}")
+        raise
 
     logger.info(f"relatorio enviado para {to}")
