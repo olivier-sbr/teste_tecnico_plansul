@@ -4,14 +4,7 @@ from dotenv import load_dotenv
 
 from reader import load_excel, load_csv
 from preprocessing import normalize_excel, normalize_csv
-from sourcemerger import (
-    merge_sources,
-    log_single_source_records,
-    log_value_divergences,
-    log_name_divergences,
-    log_ans_divergences,
-    classify_divergences,
-)
+from sourcemerger import SourceMerger
 from pdfmapper import rename_pdfs
 from reportwriter import generate_report
 from emailsender import send_report
@@ -37,21 +30,19 @@ if __name__ == "__main__":
     df_csv = normalize_csv(df_csv)
 
     logger.info("consolidando dataset")
-    df = merge_sources(df_excel, df_csv)
-    logger.info(f"consolidado: {len(df)} linhas | BOTH={len(df[df.fonte=='BOTH'])} CSV_ONLY={len(df[df.fonte=='CSV_ONLY'])} EXCEL_ONLY={len(df[df.fonte=='EXCEL_ONLY'])}")
+    merger = SourceMerger(df_excel, df_csv)
+    logger.info(
+        f"consolidado: {len(merger.df)} linhas | "
+        f"BOTH={len(merger.df[merger.df.fonte == 'BOTH'])} | "
+        f"CSV_ONLY={len(merger.df[merger.df.fonte == 'CSV_ONLY'])} | "
+        f"EXCEL_ONLY={len(merger.df[merger.df.fonte == 'EXCEL_ONLY'])}"
+    )
 
-    logger.info("detectando registros em fonte unica")
-    log_single_source_records(df)
-
-    logger.info("detectando divergencias de valor")
-    log_value_divergences(df)
-
-    logger.info("detectando divergencias de nome e ANS")
-    log_name_divergences(df)
-    log_ans_divergences(df)
+    logger.info("detectando divergencias")
+    merger.log_divergences()
 
     logger.info("classificando divergencias por linha")
-    df = classify_divergences(df)
+    df = merger.classify()
 
     logger.info("renomeando laudos")
     renamed, pdf_counts, pdf_conflicts, pdf_unmatched = rename_pdfs(df)
