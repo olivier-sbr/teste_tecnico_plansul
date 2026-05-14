@@ -72,6 +72,7 @@ Os e-mails enviados aparecem no inbox do Mailtrap — nenhum destinatário real 
 ## Execução
 
 ```bash
+chmod +x run.sh
 bash run.sh
 ```
 
