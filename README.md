@@ -32,10 +32,14 @@ Copie o arquivo de exemplo e preencha com suas credenciais:
 cp .env.example .env
 ```
 
-### Gmail
+### Gmail (recomendado)
 
-Use uma **App Password** — a senha normal não funciona com SMTP.  
-Para gerar: conta Google → Segurança → Verificação em duas etapas → Senhas de app.
+O Gmail não aceita a senha normal via SMTP — é necessário gerar uma **App Password**:
+
+1. Acesse [myaccount.google.com](https://myaccount.google.com)
+2. Segurança → Verificação em duas etapas (precisa estar ativa)
+3. Segurança → Senhas de app → selecione "Outro" → gere
+4. Copie a senha de 16 caracteres gerada (formato `xxxx xxxx xxxx xxxx`)
 
 ```
 EMAIL_USER=seu@gmail.com
@@ -45,9 +49,13 @@ EMAIL_HOST=smtp.gmail.com
 EMAIL_PORT=587
 ```
 
-### Mailtrap (sandbox, sem envio real)
+### Mailtrap (sandbox — recebe sem enviar de verdade)
 
-Crie uma conta em [mailtrap.io](https://mailtrap.io), abra o inbox de sandbox e copie as credenciais SMTP da aba **SMTP Settings**.
+Útil para testar sem risco de enviar e-mail real. Crie uma conta gratuita em [mailtrap.io](https://mailtrap.io):
+
+1. Acesse **Email Testing → Inboxes**
+2. Clique no inbox padrão → aba **SMTP Settings**
+3. Copie usuário, senha, host e porta
 
 ```
 EMAIL_USER=usuario_mailtrap
@@ -56,6 +64,8 @@ EMAIL_TO=qualquer@email.com
 EMAIL_HOST=sandbox.smtp.mailtrap.io
 EMAIL_PORT=2525
 ```
+
+Os e-mails enviados aparecem no inbox do Mailtrap — nenhum destinatário real é atingido.
 
 ---
 
